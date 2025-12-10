@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ReelCreator - AI Powered Short Video App</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- CSS -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000;
+            color: white;
+            overflow: hidden; /* App-like feel */
+        }
+        
+        /* Hide Scrollbar */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Snap Scrolling for Feed */
+        .snap-container {
+            scroll-snap-type: y mandatory;
+            overflow-y: scroll;
+            height: 100vh;
+            scroll-behavior: smooth;
+        }
+        .snap-item {
+            scroll-snap-align: start;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 3px solid #fff;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Record Button Animation */
+        .recording-pulse {
+            animation: pulse-red 1.5s infinite;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        /* Video Filters */
+        .filter-vintage { filter: sepia(0.5) contrast(1.2); }
+        .filter-bw { filter: grayscale(1) contrast(1.1); }
+        .filter-warm { filter: sepia(0.3) saturate(1.4); }
+        .filter-cool { filter: contrast(1.1) brightness(1.1) hue-rotate(180deg) saturate(0.5); }
+        
+        /* Draggable Sticker/Text */
+        .overlay-element {
+            position: absolute;
+            cursor: move;
+            user-select: none;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            touch-action: none;
+        }
+
+        /* Progress Bar */
+        .progress-segment {
+            transition: width 0.1s linear;
+        }
+    </style>
+</head>
+<body class="bg-black h-screen w-full relative sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-800">
+
+    <!-- === VIEW: FEED (HOME) === -->
+    <div id="view-feed" class="view h-full w-full relative z-10">
+        <!-- Top Nav (Following/For You) -->
+        <div class="absolute top-0 w-full z-20 pt-4 pb-2 bg-gradient-to-b from-black/60 to-transparent flex justify-center items-center font-semibold text-lg">
+            <span class="text-gray-400 mr-4 cursor-pointer">Following</span>
+            <span class="text-white border-b-2 border-white pb-0.5 cursor-pointer">For You</span>
+        </div>
+
+        <!-- Feed Container -->
+        <div id="feed-container" class="snap-container no-scrollbar w-full h-full bg-gray-900">
+            <!-- Feed Items will be injected here via JS -->
+            <div id="feed-loading" class="h-full w-full flex flex-col items-center justify-center">
+                <div class="loader mb-4"></div>
+                <p class="text-gray-400 text-sm">Curating your feed...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- === VIEW: CAMERA (CREATOR) === -->
+    <div id="view-camera" class="view h-full w-full bg-black absolute top-0 left-0 z-20 hidden">
+        
+        <!-- Camera Preview -->
+        <video id="camera-preview" autoplay playsinline muted class="w-full h-full object-cover transform scale-x-[-1]"></video>
+        
+        <!-- Filter Overlay (Applied via JS class) -->
+        <div id="camera-filter-overlay" class="absolute inset-0 pointer-events-none"></div>
+
+        <!-- Top Controls -->
+        <div class="absolute top-4 left-4 z-30">
+            <button onclick="closeCamera()" class="p-2"><i class="bi bi-x-lg text-2xl drop-shadow-md"></i></button>
+        </div>
+        
+        <div class="absolute top-4 w-full flex justify-center z-30 pointer-events-none">
+            <button onclick="openMusicModal()" class="pointer-events-auto bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full flex items-center space-x-2 text-sm font-medium animate-fade-in shadow-lg border border-white/10">
+                <i class="bi bi-music-note-beamed"></i>
+                <span id="selected-song-name">Add Sound</span>
+            </button>
+        </div>
+
+        <!-- Right Tools -->
+        <div class="absolute top-16 right-4 z-30 flex flex-col space-y-6 items-end">
+            <button onclick="toggleCameraFacing()" class="flex flex-col items-center group">
+                <i class="bi bi-arrow-repeat text-2xl drop-shadow-md group-active:scale-90 transition"></i>
+                <span class="text-[10px] font-medium mt-1 drop-shadow-md">Flip</span>
+            </button>
+            <button onclick="changeSpeed()" class="flex flex-col items-center group">
+                <i class="bi bi-speedometer2 text-2xl drop-shadow-md group-active:scale-90 transition"></i>
+                <span id="speed-label" class="text-[10px] font-medium mt-1 drop-shadow-md">1x</span>
+            </button>
+            <button onclick="selectFilter()" class="flex flex-col items-center group">
+                <i class="bi bi-magic text-2xl drop-shadow-md group-active:scale-90 transition"></i>
+                <span class="text-[10px] font-medium mt-1 drop-shadow-md">Filters</span>
+            </button>
+            <button class="flex flex-col items-center group opacity-50">
+                <i class="bi bi-clock-history text-2xl drop-shadow-md"></i>
+                <span class="text-[10px] font-medium mt-1 drop-shadow-md">Timer</span>
+            </button>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="absolute bottom-0 w-full p-6 z-30 bg-gradient-to-t from-black/80 to-transparent flex flex-col items-center">
+            
+            <!-- Progress Bar -->
+            <div class="w-full h-1.5 bg-gray-600/50 rounded-full mb-8 overflow-hidden flex relative">
+                <div id="record-progress" class="h-full bg-red-500 w-0 transition-all duration-100"></div>
+                <!-- Segments markers could go here -->
+            </div>
+
+            <div class="flex items-center justify-between w-full px-8">
+                <!-- Gallery Implementation (Mock) -->
+                <div class="w-10 h-10 rounded-lg border-2 border-white overflow-hidden bg-gray-800">
+                     <img src="https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=100&q=80" class="w-full h-full object-cover opacity-60">
+                </div>
+
+                <!-- Shutter Button -->
+                <button id="shutter-btn" class="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center relative transition-transform active:scale-95 touch-manipulation">
+                    <div id="shutter-inner" class="w-16 h-16 bg-red-500 rounded-full transition-all duration-200"></div>
+                </button>
+
+                <!-- Next Button (Appears if content exists) -->
+                <div class="w-10 flex justify-center">
+                     <button id="camera-next-btn" onclick="goToEditor()" class="hidden w-10 h-10 bg-white rounded-full flex items-center justify-center text-black font-bold shadow-lg transform transition active:scale-90">
+                        <i class="bi bi-check-lg text-xl"></i>
+                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- === VIEW: MUSIC MODAL === -->
+    <div id="music-modal" class="absolute inset-0 z-50 bg-gray-900 flex flex-col transform translate-y-full transition-transform duration-300">
+        <div class="flex items-center justify-between p-4 border-b border-gray-800">
+            <button onclick="closeMusicModal()" class="text-white text-lg font-medium">Cancel</button>
+            <h2 class="font-bold">Music</h2>
+            <div class="w-10"></div>
+        </div>
+        
+        <div class="p-4">
+            <div class="relative">
+                <i class="bi bi-search absolute left-3 top-3 text-gray-500"></i>
+                <input type="text" id="music-search" placeholder="Search songs..." class="w-full bg-gray-800 text-white rounded-lg py-2.5 pl-10 pr-4 focus:outline-none focus:ring-1 focus:ring-gray-600">
+            </div>
+        </div>
+
+        <div id="music-list" class="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+            <!-- JS will populate -->
+            <div class="text-center text-gray-500 mt-10">Search for top hits...</div>
+        </div>
+    </div>
+
+    <!-- === VIEW: EDITOR === -->
+    <div id="view-editor" class="view h-full w-full bg-black absolute top-0 left-0 z-20 hidden">
+        <!-- Editor Header -->
+        <div class="absolute top-0 w-full z-30 flex justify-between items-center p-4 pt-4 bg-gradient-to-b from-black/50 to-transparent">
+            <button onclick="backToCamera()" class="p-2"><i class="bi bi-chevron-left text-2xl drop-shadow-md"></i></button>
+            <button onclick="goToPublish()" class="bg-red-500 text-white px-4 py-1.5 rounded-full text-sm font-semibold shadow-lg">Next</button>
+        </div>
+
+        <!-- Video Canvas Container -->
+        <div id="editor-canvas-container" class="relative w-full h-full bg-gray-900 flex items-center justify-center overflow-hidden">
+            <video id="editor-preview" playsinline loop class="w-full h-full object-cover"></video>
+            <!-- Overlays Container -->
+            <div id="sticker-layer" class="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
+                <!-- Stickers/Text injected here -->
+            </div>
+        </div>
+
+        <!-- Editor Toolbar -->
+        <div class="absolute bottom-0 w-full p-4 pb-8 z-30 bg-gradient-to-t from-black/90 to-transparent">
+            <div class="flex justify-around items-end text-white">
+                <button onclick="addTextOverlay()" class="flex flex-col items-center space-y-1">
+                    <div class="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-600"><i class="bi bi-fonts"></i></div>
+                    <span class="text-xs">Text</span>
+                </button>
+                <button onclick="addSticker()" class="flex flex-col items-center space-y-1">
+                    <div class="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-600"><i class="bi bi-emoji-smile"></i></div>
+                    <span class="text-xs">Sticker</span>
+                </button>
+                <button class="flex flex-col items-center space-y-1 opacity-50 relative">
+                     <div class="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-600"><i class="bi bi-scissors"></i></div>
+                    <span class="text-xs">Trim</span>
+                    <span class="absolute -top-2 right-0 text-[10px] bg-yellow-500 text-black px-1 rounded">PRO</span>
+                </button>
+                <button class="flex flex-col items-center space-y-1 opacity-50">
+                    <div class="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center border border-gray-600"><i class="bi bi-volume-up"></i></div>
+                   <span class="text-xs">Volume</span>
+               </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- === VIEW: PUBLISH === -->
+    <div id="view-publish" class="view h-full w-full bg-gray-900 absolute top-0 left-0 z-20 hidden flex flex-col">
+        <div class="flex items-center justify-between p-4 bg-gray-900 border-b border-gray-800">
+            <button onclick="backToEditor()" class="p-2 -ml-2"><i class="bi bi-chevron-left text-xl"></i></button>
+            <h2 class="font-bold text-lg">New Post</h2>
+            <div class="w-8"></div>
+        </div>
+
+        <div class="p-4 flex space-x-4">
+            <div class="w-24 h-32 bg-gray-800 rounded overflow-hidden relative group">
+                <video id="publish-thumb" class="w-full h-full object-cover opacity-70"></video>
+                <div class="absolute inset-0 flex items-center justify-center">
+                   <span class="text-xs text-center px-1">Cover</span>
+                </div>
+            </div>
+            <textarea id="post-caption" class="flex-1 bg-transparent resize-none focus:outline-none text-sm leading-relaxed h-32" placeholder="Write a caption... #reels #viral"></textarea>
+        </div>
+
+        <div class="mt-2 border-t border-gray-800">
+             <div class="p-4 flex justify-between items-center border-b border-gray-800">
+                 <span class="text-sm">Tag People</span>
+                 <i class="bi bi-chevron-right text-gray-500"></i>
+             </div>
+             <div class="p-4 flex justify-between items-center border-b border-gray-800">
+                 <span class="text-sm">Add Location</span>
+                 <i class="bi bi-chevron-right text-gray-500"></i>
+             </div>
+             <div class="p-4 flex justify-between items-center border-b border-gray-800">
+                <span class="text-sm">Advanced Settings</span>
+                <i class="bi bi-chevron-right text-gray-500"></i>
+            </div>
+        </div>
+
+        <div class="mt-auto p-4 pb-8 bg-gray-900 border-t border-gray-800">
+            <button id="btn-share" onclick="publishReel()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg text-sm transition flex justify-center items-center">
+                <span>Share to Feed</span>
+            </button>
+            <button class="w-full mt-3 bg-gray-800 text-white font-semibold py-3 rounded-lg text-sm transition">
+                Save Draft
+            </button>
+        </div>
+    </div>
+
+    <!-- === BOTTOM NAVIGATION BAR === -->
+    <div id="bottom-nav" class="fixed bottom-0 w-full z-40 bg-black border-t border-gray-800 h-16 sm:max-w-md">
+        <div class="grid grid-cols-5 h-full items-center text-gray-400">
+            <!-- Home -->
+            <button onclick="switchTab('home')" class="nav-btn flex flex-col items-center justify-center active:scale-95 transition text-white">
+                <i class="bi bi-house-door-fill text-xl"></i>
+            </button>
+            
+            <!-- Search -->
+            <button class="nav-btn flex flex-col items-center justify-center active:scale-95 transition">
+                <i class="bi bi-search text-xl"></i>
+            </button>
+
+            <!-- Create (Large Center) -->
+            <button onclick="openCamera()" class="nav-btn flex flex-col items-center justify-center -mt-2">
+                <div class="w-12 h-8 rounded-lg bg-gradient-to-r from-cyan-400 to-red-500 p-[2px] flex items-center justify-center relative">
+                    <div class="w-full h-full bg-black rounded flex items-center justify-center relative z-10">
+                       <i class="bi bi-plus-lg text-white font-bold"></i>
+                    </div>
+                     <!-- Aesthetic faux-3d effect for tik-tok logo feel -->
+                     <div class="absolute left-1 top-0 w-full h-full bg-cyan-400 rounded opacity-60 mix-blend-screen transform -translate-x-0.5"></div>
+                     <div class="absolute right-1 top-0 w-full h-full bg-red-500 rounded opacity-60 mix-blend-screen transform translate-x-0.5"></div>
+                </div>
+            </button>
+
+            <!-- Inbox -->
+            <button class="nav-btn flex flex-col items-center justify-center active:scale-95 transition">
+                <i class="bi bi-chat-dots text-xl"></i>
+            </button>
+
+            <!-- Profile -->
+            <button class="nav-btn flex flex-col items-center justify-center active:scale-95 transition">
+                <i class="bi bi-person text-xl"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script>
+        // CONFIG
+        const APP_SLUG = "serene-digital-sleek-4081";
+        const AUTH_TOKEN = "Bearer deak28MFrRUuAOHyY2Mw0D42TmH2";
+        const API_BASE = "https://r0c8kgwocscg8gsokogwwsw4.zetaverse.one";
+
+        // STATE
+        let mediaRecorder;
+        let recordedChunks = [];
+        let stream;
+        let isRecording = false;
+        let currentFilter = '';
+        let playbackSpeed = 1.0;
+        let selectedMusic = null; // { title, url, previewUrl }
+        let audioPlayer = new Audio();
+        let videoBlob = null;
+        let overlays = [];
+
+        // DOM ELEMENTS
+        const cameraPreview = document.getElementById('camera-preview');
+        const shutterBtn = document.getElementById('shutter-btn');
+        const shutterInner = document.getElementById('shutter-inner');
+        const nextBtn = document.getElementById('camera-next-btn');
+        const progressBar = document.getElementById('record-progress');
+        const editorPreview = document.getElementById('editor-preview');
+        const feedContainer = document.getElementById('feed-container');
+
+        // === INIT ===
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFeed();
+            
+            // Search Music Listener
+            document.getElementById('music-search').addEventListener('keypress', (e) => {
+                if(e.key === 'Enter') searchMusic(e.target.value);
+            });
+        });
+
+        // === NAVIGATION ===
+        function switchTab(tab) {
+            // Simplified for prototype: always reload feed or just close camera
+            if(tab === 'home') {
+                closeCamera();
+                document.getElementById('view-publish').classList.add('hidden');
+                document.getElementById('view-editor').classList.add('hidden');
+                loadFeed(); // Refresh
+            }
+        }
+
+        function openCamera() {
+            document.getElementById('view-camera').classList.remove('hidden');
+            document.getElementById('bottom-nav').classList.add('hidden');
+            startCamera();
+        }
+
+        function closeCamera() {
+            document.getElementById('view-camera').classList.add('hidden');
+            document.getElementById('bottom-nav').classList.remove('hidden');
+            stopCamera();
+            // Reset
+            recordedChunks = [];
+            updateProgressBar();
+            selectedMusic = null;
+            document.getElementById('selected-song-name').innerText = "Add Sound";
+            nextBtn.classList.add('hidden');
+        }
+
+        function goToEditor() {
+            if(recordedChunks.length === 0) return;
+            
+            // Create Blob
+            videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+            const videoURL = URL.createObjectURL(videoBlob);
+            
+            document.getElementById('view-camera').classList.add('hidden');
+            document.getElementById('view-editor').classList.remove('hidden');
+            
+            editorPreview.src = videoURL;
+            editorPreview.className = `w-full h-full object-cover ${currentFilter}`;
+            editorPreview.playbackRate = playbackSpeed;
+            editorPreview.play();
+
+            // Sync music in editor
+            if(selectedMusic) {
+                audioPlayer.currentTime = 0;
+                editorPreview.muted = true; // Use audio player for sound
+                audioPlayer.play();
+                editorPreview.onended = () => {
+                    audioPlayer.currentTime = 0;
+                    audioPlayer.play();
+                    editorPreview.play();
+                }
+            } else {
+                editorPreview.muted = false;
+            }
+        }
+
+        function backToCamera() {
+            document.getElementById('view-editor').classList.add('hidden');
+            document.getElementById('view-camera').classList.remove('hidden');
+            editorPreview.pause();
+            audioPlayer.pause();
+        }
+
+        function goToPublish() {
+            document.getElementById('view-editor').classList.add('hidden');
+            document.getElementById('view-publish').classList.remove('hidden');
+            
+            const thumbVideo = document.getElementById('publish-thumb');
+            thumbVideo.src = editorPreview.src;
+            thumbVideo.className = `w-full h-full object-cover ${currentFilter}`;
+        }
+
+        function backToEditor() {
+            document.getElementById('view-publish').classList.add('hidden');
+            document.getElementById('view-editor').classList.remove('hidden');
+        }
+
+        // === CAMERA LOGIC ===
+        async function startCamera() {
+            try {
+                // Constraints for vertical mobile video
+                const constraints = {
+                    audio: true,
+                    video: { 
+                        facingMode: "user",
+                        aspectRatio: { ideal: 9/16 }
+                    }
+                };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                cameraPreview.srcObject = stream;
+                
+                // Init MediaRecorder
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+                mediaRecorder.onstart = () => {
+                    isRecording = true;
+                    shutterInner.classList.replace('rounded-full', 'rounded-md');
+                    shutterInner.classList.add('scale-50');
+                    progressBar.classList.add('recording-pulse');
+                    startTimer();
+                    
+                    if(selectedMusic) {
+                        editAudioPlayback(true);
+                    }
+                };
+                mediaRecorder.onstop = () => {
+                    isRecording = false;
+                    shutterInner.classList.replace('rounded-md', 'rounded-full');
+                    shutterInner.classList.remove('scale-50');
+                    progressBar.classList.remove('recording-pulse');
+                    clearInterval(recordingTimer);
+                    
+                    if(selectedMusic) {
+                        editAudioPlayback(false);
+                    }
+                    
+                    nextBtn.classList.remove('hidden');
+                };
+
+            } catch (err) {
+                console.error("Camera Error:", err);
+                alert("Could not access camera. Please allow permissions.");
+            }
+        }
+
+        function stopCamera() {
+            if(stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        function toggleCameraFacing() {
+            // In a real app we would stop stream and restart with facingMode: 'environment'
+            // For this HTML file, we simulate by flipping CSS
+            cameraPreview.classList.toggle('scale-x-[-1]');
+        }
+
+        // RECORDING CONTROLS
+        // Handle Shutter Interaction
+        shutterBtn.addEventListener('mousedown', startRecording);
+        shutterBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+        shutterBtn.addEventListener('mouseup', stopRecording);
+        shutterBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
+
+        function startRecording() {
+            if (mediaRecorder && mediaRecorder.state === "inactive") {
+                mediaRecorder.start();
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+            }
+        }
+
+        let recordingTimer;
+        let recordingDuration = 0;
+        const MAX_DURATION = 15000; // 15s
+
+        function startTimer() {
+            let startTime = Date.now();
+            let startDuration = recordingDuration;
+            
+            recordingTimer = setInterval(() => {
+                let elapsed = Date.now() - startTime;
+                recordingDuration = startDuration + elapsed;
+                
+                let percent = (recordingDuration / MAX_DURATION) * 100;
+                progressBar.style.width = `${percent}%`;
+
+                if(recordingDuration >= MAX_DURATION) {
+                    stopRecording();
+                }
+            }, 50);
+        }
+
+        function updateProgressBar() {
+            progressBar.style.width = '0%';
+            recordingDuration = 0;
+        }
+
+        // === FEATURES: FILTERS & SPEED ===
+        const filters = ['', 'filter-vintage', 'filter-bw', 'filter-warm', 'filter-cool'];
+        let filterIndex = 0;
+
+        function selectFilter() {
+            filterIndex = (filterIndex + 1) % filters.length;
+            currentFilter = filters[filterIndex];
+            
+            const overlay = document.getElementById('camera-filter-overlay');
+            // Remove all filter classes
+            filters.forEach(f => { if(f) overlay.classList.remove(f) });
+            // Add new
+            if(currentFilter) overlay.classList.add(currentFilter);
+            
+            // Visual feedback
+            const name = currentFilter ? currentFilter.replace('filter-', '') : 'Normal';
+            showToast(`Filter: ${name}`);
+        }
+
+        function changeSpeed() {
+            const speeds = [0.5, 1, 2, 3];
+            let idx = speeds.indexOf(playbackSpeed);
+            playbackSpeed = speeds[(idx + 1) % speeds.length];
+            document.getElementById('speed-label').innerText = `${playbackSpeed}x`;
+            showToast(`Speed: ${playbackSpeed}x`);
+        }
+
+        // === MUSIC ===
+        function openMusicModal() {
+            document.getElementById('music-modal').classList.remove('translate-y-full');
+            // Load initial suggestions if empty
+            if(document.getElementById('music-list').children.length <= 1) {
+                searchMusic('pop');
+            }
+        }
+
+        function closeMusicModal() {
+            document.getElementById('music-modal').classList.add('translate-y-full');
+        }
+
+        async function searchMusic(query) {
+            const list = document.getElementById('music-list');
+            list.innerHTML = '<div class="loader mx-auto"></div>';
+            
+            try {
+                // Using iTunes Search API
+                const res = await fetch(`https://itunes.apple.com/search?term=${query}&entity=song&limit=15`);
+                const data = await res.json();
+                
+                list.innerHTML = '';
+                
+                if(data.resultCount === 0) {
+                    list.innerHTML = '<div class="text-center text-gray-500 mt-4">No results found</div>';
+                    return;
+                }
+
+                data.results.forEach(song => {
+                    const el = document.createElement('div');
+                    el.className = 'flex items-center p-2 hover:bg-gray-800 rounded cursor-pointer group';
+                    el.innerHTML = `
+                        <img src="${song.artworkUrl60}" class="w-10 h-10 rounded mr-3">
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-bold truncate text-white">${song.trackName}</h3>
+                            <p class="text-xs text-gray-400 truncate">${song.artistName}</p>
+                        </div>
+                        <button class="w-8 h-8 rounded-full border border-gray-600 flex items-center justify-center group-hover:bg-red-500 group-hover:border-red-500">
+                            <i class="bi bi-play-fill"></i>
+                        </button>
+                    `;
+                    el.onclick = () => selectSong(song);
+                    list.appendChild(el);
+                });
+
+            } catch(e) {
+                list.innerHTML = '<div class="text-red-500 text-center">Error fetching music</div>';
+            }
+        }
+
+        function selectSong(song) {
+            selectedMusic = song;
+            document.getElementById('selected-song-name').innerText = song.trackName.length > 15 ? song.trackName.substring(0, 15)+'...' : song.trackName;
+            
+            audioPlayer.src = song.previewUrl;
+            audioPlayer.loop = true;
+            
+            closeMusicModal();
+            showToast(`Selected: ${song.trackName}`);
+        }
+
+        function editAudioPlayback(play) {
+            if(!audioPlayer.src) return;
+            if(play) {
+                audioPlayer.currentTime = 0;
+                audioPlayer.playbackRate = playbackSpeed; // Sync music speed with video? Usually music stays 1x but for lip sync usually we change music speed while recording and correct video later. Simplified here: music plays normal.
+                audioPlayer.play();
+            } else {
+                audioPlayer.pause();
+            }
+        }
+
+        // === EDITOR OVERLAYS ===
+        function addTextOverlay() {
+            const text = prompt("Enter text:", "My Vibe");
+            if(!text) return;
+
+            const el = document.createElement('div');
+            el.className = 'overlay-element text-white text-2xl font-bold p-2 bg-black/30 rounded';
+            el.style.top = '50%';
+            el.style.left = '50%';
+            el.style.transform = 'translate(-50%, -50%)';
+            el.innerText = text;
+            
+            makeDraggable(el);
+            document.getElementById('sticker-layer').appendChild(el);
+            
+            overlays.push({ type: 'text', content: text, x: 50, y: 50 }); // Simplified position tracking
+        }
+
+        function addSticker() {
+            const stickers = ['🔥', '❤️', '😎', '🌟', '👀', '🎉'];
+            const sticker = stickers[Math.floor(Math.random() * stickers.length)];
+            
+            const el = document.createElement('div');
+            el.className = 'overlay-element text-5xl';
+            el.style.top = '50%';
+            el.style.left = '50%';
+            el.style.transform = 'translate(-50%, -50%)';
+            el.innerText = sticker;
+            
+            makeDraggable(el);
+            document.getElementById('sticker-layer').appendChild(el);
+
+            overlays.push({ type: 'sticker', content: sticker, x: 50, y: 50 });
+        }
+
+        function makeDraggable(el) {
+            el.style.pointerEvents = 'auto'; // Re-enable pointer events for the element
+            let startX, startY, initialLeft, initialTop;
+
+            const onMove = (e) => {
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                const deltaX = clientX - startX;
+                const deltaY = clientY - startY;
+
+                // Simple conversion to px, ignoring percentage logic for drag for now
+                el.style.left = `${initialLeft + deltaX}px`;
+                el.style.top = `${initialTop + deltaY}px`;
+                el.style.transform = 'none'; // remove center transform once moved
+            };
+
+            const onEnd = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onEnd);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onEnd);
+            };
+
+            const onStart = (e) => {
+                startX = e.touches ? e.touches[0].clientX : e.clientX;
+                startY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                const rect = el.getBoundingClientRect();
+                const parentRect = el.parentElement.getBoundingClientRect();
+                
+                // Calculate current position relative to parent
+                initialLeft = rect.left - parentRect.left;
+                initialTop = rect.top - parentRect.top;
+
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onEnd);
+                document.addEventListener('touchmove', onMove, { passive: false });
+                document.addEventListener('touchend', onEnd);
+            };
+
+            el.addEventListener('mousedown', onStart);
+            el.addEventListener('touchstart', onStart, { passive: false });
+        }
+
+
+        // === PUBLISH & FEED ===
+        async function publishReel() {
+            const btn = document.getElementById('btn-share');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = `<div class="loader"></div>`;
+            btn.disabled = true;
+
+            try {
+                // 1. Upload Video
+                const formData = new FormData();
+                formData.append('file', videoBlob, `reel-${Date.now()}.webm`);
+                formData.append('userId', 'user-'+Date.now());
+                formData.append('appSlug', APP_SLUG);
+
+                const uploadRes = await fetch(`${API_BASE}/storage/upload`, {
+                    method: 'POST',
+                    headers: { 'Authorization': AUTH_TOKEN },
+                    body: formData
+                });
+                const uploadData = await uploadRes.json();
+                
+                if(!uploadData.success) throw new Error('Upload failed');
+
+                // 2. Save Metadata to DB
+                const reelData = {
+                    videoUrl: uploadData.url,
+                    caption: document.getElementById('post-caption').value,
+                    music: selectedMusic,
+                    filter: currentFilter,
+                    speed: playbackSpeed,
+                    overlays: overlays, // Saving overlay data (simplified)
+                    likes: 0,
+                    comments: 0,
+                    creator: "You",
+                    timestamp: new Date().toISOString()
+                };
+
+                const dbRes = await fetch(`${API_BASE}/mongodb`, {
+                    method: 'POST',
+                    headers: { 'Authorization': AUTH_TOKEN, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        appSlug: APP_SLUG,
+                        action: 'create',
+                        collection: 'reels',
+                        data: reelData
+                    })
+                });
+
+                const dbData = await dbRes.json();
+                
+                if(dbData.success) {
+                    showToast('Reel Published!');
+                    setTimeout(() => switchTab('home'), 1000);
+                } else {
+                    throw new Error("DB Save failed");
+                }
+
+            } catch(e) {
+                console.error(e);
+                alert("Failed to publish. Try again.");
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadFeed() {
+            feedContainer.innerHTML = '<div class="h-full w-full flex flex-col items-center justify-center"><div class="loader mb-4"></div></div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/mongodb`, {
+                    method: 'POST',
+                    headers: { 'Authorization': AUTH_TOKEN, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        appSlug: APP_SLUG,
+                        action: 'read',
+                        collection: 'reels'
+                    })
+                });
+                
+                const data = await res.json();
+                feedContainer.innerHTML = ''; // clear loader
+
+                if(!data.success || !data.result || data.result.length === 0) {
+                     feedContainer.innerHTML = `
+                        <div class="h-full w-full flex flex-col items-center justify-center text-center p-8">
+                            <p class="text-xl font-bold mb-2">No Reels Yet</p>
+                            <p class="text-gray-400 mb-6">Be the first to create something awesome!</p>
+                            <button onclick="openCamera()" class="bg-gradient-to-r from-pink-500 to-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg transform transition hover:scale-105">Create Reel</button>
+                        </div>
+                     `;
+                     return;
+                }
+
+                // Reverse to show newest first
+                data.result.reverse().forEach(reel => {
+                    const el = createReelElement(reel);
+                    feedContainer.appendChild(el);
+                });
+
+                // Init Intersection Observer for auto-play
+                initObserver();
+
+            } catch(e) {
+                console.error(e);
+                feedContainer.innerHTML = '<div class="flex items-center justify-center h-full text-red-500">Failed to load feed</div>';
+            }
+        }
+
+        function createReelElement(reel) {
+            const div = document.createElement('div');
+            div.className = 'snap-item w-full h-full relative bg-gray-900 overflow-hidden border-b border-gray-800';
+            
+            // Filter class applied to video
+            const filterClass = reel.filter || '';
+            const musicInfo = reel.music ? `<i class="bi bi-music-note-beamed mr-1"></i> ${reel.music.trackName} - ${reel.music.artistName}` : `<i class="bi bi-music-note-beamed mr-1"></i> Original Audio`;
+
+            div.innerHTML = `
+                <video src="${reel.videoUrl}" loop playsinline class="w-full h-full object-cover ${filterClass}"></video>
+                
+                <!-- Play Pause Overlay (Invisible trigger) -->
+                <div class="absolute inset-0 z-10" onclick="togglePlay(this)"></div>
+
+                <!-- Right Side Actions -->
+                <div class="absolute bottom-20 right-2 z-20 flex flex-col items-center space-y-6">
+                    <div class="flex flex-col items-center">
+                        <div class="w-10 h-10 rounded-full bg-gray-700 border border-white mb-1 overflow-hidden">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=${reel.creator}" />
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-center group cursor-pointer" onclick="likePost(this)">
+                        <i class="bi bi-heart-fill text-3xl text-white transition-colors duration-200 drop-shadow-md"></i>
+                        <span class="text-xs font-semibold drop-shadow-md mt-1">${reel.likes || 0}</span>
+                    </div>
+                    <div class="flex flex-col items-center cursor-pointer">
+                        <i class="bi bi-chat-dots-fill text-3xl text-white drop-shadow-md"></i>
+                        <span class="text-xs font-semibold drop-shadow-md mt-1">${reel.comments || 0}</span>
+                    </div>
+                    <div class="flex flex-col items-center cursor-pointer">
+                        <i class="bi bi-share-fill text-2xl text-white drop-shadow-md"></i>
+                        <span class="text-xs font-semibold drop-shadow-md mt-1">Share</span>
+                    </div>
+                </div>
+
+                <!-- Bottom Info -->
+                <div class="absolute bottom-0 left-0 w-full p-4 z-20 bg-gradient-to-t from-black/80 to-transparent pt-10">
+                    <h3 class="font-bold text-white mb-2 text-shadow">@${reel.creator}</h3>
+                    <p class="text-sm text-gray-100 mb-3 truncate w-3/4">${reel.caption}</p>
+                    <div class="flex items-center text-xs text-white bg-white/20 px-3 py-1 rounded-full w-max backdrop-blur-sm animate-pulse">
+                        <div class="w-full overflow-hidden whitespace-nowrap">
+                            <div class="animate-marquee inline-block">
+                                ${musicInfo}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // If there's music URL and it's separate (which it isn't in this simple version, but for future proofing)
+            // Ideally we mix audio in backend, but here we rely on the video track or play separate audio if we stored it properly.
+            // For this output, we assume video has the audio or mute video and play music URL.
+            // Since we can't mix in browser easily, we will just play the video audio (which is recorded mic).
+            // *IMPROVEMENT*: If music was selected, we should auto-play that music URL with the video.
+            
+            if(reel.music && reel.music.previewUrl) {
+                const audio = new Audio(reel.music.previewUrl);
+                audio.loop = true;
+                div.querySelector('video').muted = true; // Mute mic audio if music exists (TikTok style option)
+                div._audio = audio;
+            }
+
+            return div;
+        }
+
+        // === FEED INTERACTIONS ===
+        function togglePlay(overlay) {
+            const video = overlay.parentNode.querySelector('video');
+            const audio = overlay.parentNode._audio;
+            
+            if(video.paused) {
+                video.play();
+                if(audio) audio.play();
+            } else {
+                video.pause();
+                if(audio) audio.pause();
+            }
+        }
+
+        function likePost(btn) {
+            const icon = btn.querySelector('i');
+            const count = btn.querySelector('span');
+            
+            if(icon.classList.contains('text-red-500')) {
+                icon.classList.remove('text-red-500');
+                icon.classList.add('text-white');
+                count.innerText = parseInt(count.innerText) - 1;
+            } else {
+                icon.classList.remove('text-white');
+                icon.classList.add('text-red-500');
+                // Trigger pop animation
+                icon.style.transform = "scale(1.4)";
+                setTimeout(() => icon.style.transform = "scale(1)", 200);
+                count.innerText = parseInt(count.innerText) + 1;
+            }
+        }
+
+        // === OBSERVER FOR AUTOPLAY ===
+        function initObserver() {
+            const options = {
+                root: feedContainer,
+                threshold: 0.6
+            };
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    const video = entry.target.querySelector('video');
+                    const audio = entry.target._audio;
+                    
+                    if (entry.isIntersecting) {
+                        video.currentTime = 0;
+                        video.play().catch(e => console.log("Autoplay blocked"));
+                        if(audio) {
+                            audio.currentTime = 0;
+                            audio.play().catch(e => console.log("Audio blocked"));
+                        }
+                    } else {
+                        video.pause();
+                        if(audio) audio.pause();
+                    }
+                });
+            }, options);
+
+            document.querySelectorAll('.snap-item').forEach(item => {
+                observer.observe(item);
+            });
+        }
+
+        // === UTILS ===
+        function showToast(msg) {
+            const div = document.createElement('div');
+            div.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-black/80 text-white px-4 py-2 rounded-full text-sm font-semibold z-50 transition opacity-0';
+            div.innerText = msg;
+            document.body.appendChild(div);
+            
+            requestAnimationFrame(() => div.classList.remove('opacity-0'));
+            setTimeout(() => {
+                div.classList.add('opacity-0');
+                setTimeout(() => div.remove(), 300);
+            }, 2000);
+        }
+
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
